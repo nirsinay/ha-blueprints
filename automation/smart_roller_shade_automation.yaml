@@ -3,7 +3,7 @@ blueprint:
   description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Tracks manual overrides and sends notifications.
   domain: automation
   author: Nir's Home Assistant Setup
-  source_url: https://github.com/yourusername/ha-blueprints/blob/main/smart_roller_shade_automation.yaml
+  source_url: https://github.com/nirsinay/ha-blueprints/blob/main/automation/smart_roller_shade_automation.yaml
   homeassistant:
     min_version: "2024.10.0"
   input:
