@@ -1,5 +1,5 @@
 blueprint:
-  name: Smart Roller Shade with AC & Window Control
+  name: Smart Roller Shade with AC & Window Control (private)
   description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Tracks manual overrides and sends notifications.
   domain: automation
   author: Nir's Home Assistant Setup
