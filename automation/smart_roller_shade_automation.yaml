@@ -1,6 +1,6 @@
 blueprint:
   name: Smart Roller Shade with AC & Window Control
-  description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Tracks manual overrides using a single helper to prevent automation from overriding manual adjustments.
+  description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Manual adjustments block automation until 10 PM reset.
   domain: automation
   author: Nir's Home Assistant Setup
   source_url: https://github.com/nirsinay/ha-blueprints/blob/main/automation/smart_roller_shade_automation.yaml
@@ -53,12 +53,6 @@ blueprint:
       name: Scheduling
       icon: mdi:calendar-clock
       input:
-        weekday_open_time:
-          name: Weekday open time
-          description: Time to open shade on weekday mornings
-          default: "07:00:00"
-          selector:
-            time:
         weekend_open_time:
           name: Weekend open time
           description: Time to open shade on weekend mornings
@@ -89,13 +83,13 @@ blueprint:
               domain: person
         shade_state_helper:
           name: Shade State Helper
-          description: "Create an input_text helper to track the last automation action.\n\n**SETUP INSTRUCTIONS:**\n1. Go to Settings → Devices & Services → Helpers\n2. Click Create Helper → Text\n3. Name it: 'Living Room Shade State' (or your room name)\n4. Set Max Character: 100\n5. Click Create\n6. Return here and select the newly created helper\n\n**HOW IT WORKS:**\n• Helper stores what the automation last set (open, shading, closed, etc.)\n• When you manually adjust the shade, automation detects it (after ~90 seconds)\n• Blocks all automation until 10 PM reset\n• At reset time, helper clears and automation resumes"
+          description: "Create an input_text helper to track the last automation action.\n\n**SETUP INSTRUCTIONS:**\n1. Go to Settings → Devices & Services → Helpers\n2. Click Create Helper → Text\n3. Name it: 'Living Room Shade State' (or your room name)\n4. Set Max Character: 100\n5. Click Create\n6. Return here and select the newly created helper\n\n**HOW IT WORKS:**\n• Helper stores what the automation last set (open, closed, moving, etc.)\n• When you manually adjust the shade, it won't match the helper state\n• Automation detects mismatch and blocks until 10 PM\n• At 10 PM, helper resets to allow automation again"
           selector:
             entity:
               domain: input_text
         notification_service:
           name: Notification service
-          description: Service to send window-open notifications (e.g., notify.phone_name)
+          description: Service to send window-open notifications
           selector:
             text:
           default: "notify.nir_s_iphone_15"
@@ -106,7 +100,6 @@ blueprint:
       input:
         temp_high_threshold:
           name: High temperature threshold
-          description: Temperature above which shade fully closes for cooling
           default: 30
           selector:
             number: 
@@ -116,7 +109,6 @@ blueprint:
               mode: slider
         temp_normal_threshold:
           name: Normal temperature threshold
-          description: Temperature below which shade returns to normal position
           default: 26
           selector:
             number: 
@@ -126,7 +118,6 @@ blueprint:
               mode: slider
         humidity_high_threshold:
           name: High humidity threshold
-          description: Humidity above which shade closes to reduce moisture
           default: 70
           selector:
             number: 
@@ -136,17 +127,16 @@ blueprint:
               mode: slider
         drive_time_seconds:
           name: Drive time
-          description: Time (in seconds) for the shade to physically move. Used to detect manual adjustments. Round up slightly.
+          description: Time (seconds) for the shade to physically finish moving. Keeps the automation from mistaking its own movement for a manual adjustment. Round up rather than be too precise — better too long than too short.
           default: 90
           selector:
             number:
-              min: 10
+              min: 5
               max: 180
               unit_of_measurement: seconds
               mode: slider
         weekday_open_position:
           name: Weekday open position
-          description: Shade position (0-100) for normal weekday operation
           default: 75
           selector:
             number: 
@@ -156,7 +146,6 @@ blueprint:
               mode: slider
         window_open_position:
           name: Window open position
-          description: Shade position (0-100) when windows are open during day
           default: 100
           selector:
             number: 
@@ -166,7 +155,6 @@ blueprint:
               mode: slider
         away_position:
           name: Away position
-          description: Shade position (0-100) when person leaves home
           default: 25
           selector:
             number: 
@@ -176,7 +164,6 @@ blueprint:
               mode: slider
         away_night_position:
           name: Away night position
-          description: Shade position (0-100) when person leaves home after sunset
           default: 0
           selector:
             number: 
@@ -186,7 +173,6 @@ blueprint:
               mode: slider
         cooling_position:
           name: Cooling position
-          description: Shade position (0-100) when AC is active
           default: 25
           selector:
             number: 
@@ -196,7 +182,6 @@ blueprint:
               mode: slider
         full_close_position:
           name: Full close position
-          description: Shade position (0-100) for full night close
           default: 100
           selector:
             number: 
@@ -209,7 +194,6 @@ mode: queued
 max: 10
 
 triggers:
-  # Daily scheduling
   - trigger: sun
     event: sunrise
     id: weekday_morning
@@ -222,8 +206,6 @@ triggers:
   - trigger: time
     at: !input reset_manual_override_time
     id: reset_manual_override
-
-  # Window sensors
   - trigger: state
     entity_id:
       - !input left_window_sensor
@@ -236,8 +218,6 @@ triggers:
       - !input right_window_sensor
     to: "off"
     id: window_closed
-
-  # Presence
   - trigger: state
     entity_id: !input person_entity
     to: "not_home"
@@ -246,8 +226,6 @@ triggers:
     entity_id: !input person_entity
     to: "home"
     id: person_arrived_home
-
-  # Temperature & Humidity
   - trigger: numeric_state
     entity_id: !input temperature_sensor
     above: !input temp_high_threshold
@@ -260,13 +238,9 @@ triggers:
     entity_id: !input humidity_sensor
     above: !input humidity_high_threshold
     id: humidity_high
-
-  # AC Mode Change
   - trigger: state
     entity_id: !input climate_entity
     id: ac_mode_change
-
-  # Manual override tracking
   - trigger: state
     entity_id: !input roller_shade
     id: cover_position_changed
@@ -274,19 +248,27 @@ triggers:
 conditions: []
 
 actions:
-  # Check if this is the reset trigger - always allow it
-  - if:
-      - condition: trigger
-        id: reset_manual_override
-    then:
-      - action: input_text.set_value
-        target:
-          entity_id: !input shade_state_helper
-        data:
-          value: "reset"
-    else:
-      # For all other triggers, check if helper is empty/reset (not in manual override mode)
-      - if:
+  - choose:
+      # Reset at 10 PM - always runs
+      - conditions:
+          - condition: trigger
+            id: reset_manual_override
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "reset"
+
+      # Weekday morning open
+      - conditions:
+          - condition: trigger
+            id: weekday_morning
+          - condition: time
+            weekday: ["mon", "tue", "wed", "thu", "fri"]
+          - condition: state
+            entity_id: !input person_entity
+            state: "home"
           - condition: or
             conditions:
               - condition: state
@@ -295,412 +277,514 @@ actions:
               - condition: state
                 entity_id: !input shade_state_helper
                 state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input weekday_open_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "open"
+
+      # Weekend morning open
+      - conditions:
+          - condition: trigger
+            id: weekend_morning
+          - condition: time
+            weekday: ["sat", "sun"]
+          - condition: state
+            entity_id: !input person_entity
+            state: "home"
+          - condition: or
+            conditions:
               - condition: state
                 entity_id: !input shade_state_helper
-                state: "moved_by_automation"
-        then:
-          # Helper is clear - proceed with automation
-          - choose:
-              # Weekday morning open
-              - conditions:
-                  - condition: trigger
-                    id: weekday_morning
-                  - condition: time
-                    weekday: ["mon", "tue", "wed", "thu", "fri"]
-                  - condition: state
-                    entity_id: !input person_entity
-                    state: "home"
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input weekday_open_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "open"
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input weekday_open_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "open"
 
-              # Weekend morning open
-              - conditions:
-                  - condition: trigger
-                    id: weekend_morning
-                  - condition: time
-                    weekday: ["sat", "sun"]
-                  - condition: state
-                    entity_id: !input person_entity
-                    state: "home"
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input weekday_open_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "open"
+      # Window opened during day
+      - conditions:
+          - condition: trigger
+            id: window_opened
+          - condition: time
+            after: "07:00:00"
+            before: "18:00:00"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - delay: "00:00:05"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input window_open_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "window_open"
 
-              # Window opened during day - fully open
-              - conditions:
-                  - condition: trigger
-                    id: window_opened
-                  - condition: time
-                    after: "07:00:00"
-                    before: "18:00:00"
-                sequence:
-                  - delay: "00:00:05"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input window_open_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "window_open"
+      # Windows closed during day - return to normal
+      - conditions:
+          - condition: trigger
+            id: window_closed
+          - condition: time
+            after: "07:00:00"
+            before: "18:00:00"
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "off"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "off"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - delay: "00:00:10"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input weekday_open_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "open"
 
-              # Windows closed during day - return to normal
-              - conditions:
-                  - condition: trigger
-                    id: window_closed
-                  - condition: time
-                    after: "07:00:00"
-                    before: "18:00:00"
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "off"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "off"
-                sequence:
-                  - delay: "00:00:10"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input weekday_open_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "open"
+      # Windows closed after sunset
+      - conditions:
+          - condition: trigger
+            id: window_closed
+          - condition: time
+            after: "18:00:00"
+            before: "07:00:00"
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "off"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "off"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - delay: "00:00:10"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input full_close_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "closed"
 
-              # Windows closed after sunset - close more
-              - conditions:
-                  - condition: trigger
-                    id: window_closed
-                  - condition: time
-                    after: "18:00:00"
-                    before: "07:00:00"
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "off"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "off"
-                sequence:
-                  - delay: "00:00:10"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input full_close_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "closed"
+      # Evening close - windows closed
+      - conditions:
+          - condition: trigger
+            id: evening_close
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "off"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "off"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input full_close_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "closed"
 
-              # Evening close - windows closed
-              - conditions:
-                  - condition: trigger
-                    id: evening_close
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "off"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "off"
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input full_close_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "closed"
+      # Evening close - windows open (notification)
+      - conditions:
+          - condition: trigger
+            id: evening_close
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "on"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "on"
+        sequence:
+          - action: !input notification_service
+            data:
+              title: "Shade - Windows Open"
+              message: "Windows are open at {{ now().strftime('%H:%M') }}. Please close them."
 
-              # Evening close - windows open (notification)
-              - conditions:
-                  - condition: trigger
-                    id: evening_close
-                  - condition: or
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "on"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "on"
-                sequence:
-                  - action: !input notification_service
-                    data:
-                      title: "Shade - Windows Open"
-                      message: "Windows are open at {{ now().strftime('%H:%M') }}. Please close them before the shade closes."
+      # Person left home - partial close
+      - conditions:
+          - condition: trigger
+            id: person_left_home
+          - condition: sun
+            before: sunset
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input away_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "away"
 
-              # Person left home - partial close
-              - conditions:
-                  - condition: trigger
-                    id: person_left_home
-                  - condition: sun
-                    before: sunset
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input away_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "away"
+      # Person left home after sunset
+      - conditions:
+          - condition: trigger
+            id: person_left_home
+          - condition: sun
+            after: sunset
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input away_night_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "away_night"
 
-              # Person left home after sunset - full close
-              - conditions:
-                  - condition: trigger
-                    id: person_left_home
-                  - condition: sun
-                    after: sunset
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input away_night_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "away_night"
+      # Person arrived home
+      - conditions:
+          - condition: trigger
+            id: person_arrived_home
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input weekday_open_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "open"
 
-              # Person arrived home
-              - conditions:
-                  - condition: trigger
-                    id: person_arrived_home
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input weekday_open_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "open"
+      # High temperature - full close
+      - conditions:
+          - condition: trigger
+            id: temp_high
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "off"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "off"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: 0
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "cooling"
 
-              # High temperature - full close for cooling
-              - conditions:
-                  - condition: trigger
-                    id: temp_high
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "off"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "off"
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: 0
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "cooling"
+      # Temperature back to normal
+      - conditions:
+          - condition: trigger
+            id: temp_normal
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "off"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "off"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input weekday_open_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "open"
 
-              # Temperature back to normal
-              - conditions:
-                  - condition: trigger
-                    id: temp_normal
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "off"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "off"
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input weekday_open_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "open"
+      # High humidity - close
+      - conditions:
+          - condition: trigger
+            id: humidity_high
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "off"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "off"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: 0
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "humidity_control"
 
-              # High humidity - close for moisture control
-              - conditions:
-                  - condition: trigger
-                    id: humidity_high
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "off"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "off"
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: 0
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "humidity_control"
+      # AC mode changed to anything other than OFF
+      - conditions:
+          - condition: trigger
+            id: ac_mode_change
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input climate_entity
+                state: "off"
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: !input left_window_sensor
+                state: "off"
+              - condition: state
+                entity_id: !input right_window_sensor
+                state: "off"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: ""
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "reset"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "moving"
+          - action: cover.set_cover_position
+            target:
+              entity_id: !input roller_shade
+            data:
+              position: !input cooling_position
+          - delay:
+              seconds: "{{ (drive_time_seconds | int(90)) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "ac_cooling"
 
-              # AC mode changed to anything other than OFF - close partially unless windows open
-              - conditions:
-                  - condition: trigger
-                    id: ac_mode_change
-                  - condition: not
-                    conditions:
-                      - condition: state
-                        entity_id: !input climate_entity
-                        state: "off"
-                  - condition: and
-                    conditions:
-                      - condition: state
-                        entity_id: !input left_window_sensor
-                        state: "off"
-                      - condition: state
-                        entity_id: !input right_window_sensor
-                        state: "off"
-                sequence:
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "moving"
-                  - action: cover.set_cover_position
-                    target:
-                      entity_id: !input roller_shade
-                    data:
-                      position: !input cooling_position
-                  - delay:
-                      seconds: "{{ (drive_time_seconds | int(90)) + 5 }}"
-                  - action: input_text.set_value
-                    target:
-                      entity_id: !input shade_state_helper
-                    data:
-                      value: "ac_cooling"
+      # Manual adjustment detected - any cover change while helper isn't "moving"
+      # (i.e. not a change the automation itself is currently making) is treated
+      # as manual and blocks automation until the reset time.
+      - conditions:
+          - condition: trigger
+            id: cover_position_changed
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "moving"
+              - condition: state
+                entity_id: !input shade_state_helper
+                state: "manual_override"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "manual_override"
