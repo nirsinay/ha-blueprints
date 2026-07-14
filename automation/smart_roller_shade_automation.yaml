@@ -1,5 +1,5 @@
 blueprint:
-  name: Smart Roller Shade with AC & Window Control (private)
+  name: Smart Roller Shade with AC & Window Control
   description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Tracks manual overrides and sends notifications.
   domain: automation
   author: Nir's Home Assistant Setup
@@ -23,14 +23,12 @@ blueprint:
           selector:
             entity:
               domain: binary_sensor
-              device_class: window
         right_window_sensor:
           name: Right window sensor
           description: Right window open/close binary sensor
           selector:
             entity:
               domain: binary_sensor
-              device_class: window
         climate_entity:
           name: Climate entity (AC/Thermostat)
           description: The air conditioner or climate control for this room
@@ -91,7 +89,7 @@ blueprint:
               domain: person
         manual_override_helper:
           name: Manual override helper
-          description: Input boolean to track manual shade adjustments
+          description: "Select or create an input boolean to track manual shade adjustments.\n\n**SETUP INSTRUCTIONS:**\n1. Go to Settings → Devices & Services → Helpers\n2. Click Create Helper → Toggle\n3. Name it: 'Living Room Shade Manual Override' (or your room name)\n4. Leave Icon as default\n5. Click Create\n6. Return here and select the newly created helper\n\n**WHAT IT DOES:**\n• Turns ON when you manually adjust the shade\n• Prevents automation from overriding your changes\n• Auto-resets to OFF at the scheduled time (default 22:00)"
           selector:
             entity:
               domain: input_boolean
