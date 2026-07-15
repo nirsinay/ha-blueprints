@@ -1,6 +1,6 @@
 blueprint:
-  name: Smart Roller Shade with AC & Window Control V1.1
-  description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Manual adjustments block automation until 10 PM reset.
+  name: Smart Roller Shade with AC & Window Control V1.2
+  description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Manual adjustments block automation until next reset time (6 AM or 10 PM).
   domain: automation
   author: Nir's Home Assistant Setup
   source_url: https://github.com/nirsinay/ha-blueprints/blob/main/automation/smart_roller_shade_automation.yaml
@@ -71,7 +71,18 @@ blueprint:
           default: "21:00:00"
           selector:
             time:
+        reset_manual_override_morning:
+          name: Reset manual override morning time
+          description: Early morning time to clear manual overrides before morning automation runs (e.g. 06:00). Allows blinds to open automatically even if manually adjusted yesterday.
+          default: "06:00:00"
+          selector:
+            time:
         reset_manual_override_time:
+          name: Reset manual override evening time
+          description: Evening time to reset the manual override and allow automation to resume
+          default: "22:00:00"
+          selector:
+            time:
         quiet_hours_start:
           name: Quiet hours start
           description: Time to start ignoring all automation triggers (e.g. 22:00 for 10 PM). Set same as end time to disable quiet hours.
@@ -82,11 +93,6 @@ blueprint:
           name: Quiet hours end
           description: Time to resume automation (e.g. 07:00 for 7 AM). Automation will NOT run between start and end times.
           default: "07:00:00"
-          selector:
-            time:
-          name: Reset manual override time
-          description: Time to reset the manual override and allow automation to resume
-          default: "22:00:00"
           selector:
             time:
     presence:
@@ -101,7 +107,7 @@ blueprint:
               domain: person
         shade_state_helper:
           name: Shade State Helper
-          description: "Create an input_text helper to track the last automation action.\n\n**SETUP INSTRUCTIONS:**\n1. Go to Settings → Devices & Services → Helpers\n2. Click Create Helper → Text\n3. Name it: 'Living Room Shade State' (or your room name)\n4. Set Max Character: 100\n5. Click Create\n6. Return here and select the newly created helper\n\n**HOW IT WORKS:**\n• Helper stores what the automation last set (open, closed, moving, etc.)\n• When you manually adjust the shade, it won't match the helper state\n• Automation detects mismatch and blocks until 10 PM\n• At 10 PM, helper resets to allow automation again"
+          description: "Create an input_text helper to track the last automation action.\n\n**SETUP INSTRUCTIONS:**\n1. Go to Settings → Devices & Services → Helpers\n2. Click Create Helper → Text\n3. Name it: 'Living Room Shade State' (or your room name)\n4. Set Max Character: 100\n5. Click Create\n6. Return here and select the newly created helper\n\n**HOW IT WORKS:**\n• Helper stores what the automation last set (open, closed, moving, etc.)\n• When you manually adjust the shade, automation detects it and blocks until reset\n• Resets at 6 AM (before morning open) and 10 PM\n• At reset time, helper clears and automation resumes"
           selector:
             entity:
               domain: input_text
@@ -145,7 +151,7 @@ blueprint:
               mode: slider
         drive_time_seconds:
           name: Drive time
-          description: Time (seconds) for the shade to physically finish moving. Keeps the automation from mistaking its own movement for a manual adjustment. Round up rather than be too precise — better too long than too short.
+          description: Time (seconds) for the shade to physically finish moving. Round up rather than be too precise — better too long than too short.
           default: 90
           selector:
             number:
@@ -222,8 +228,11 @@ triggers:
     at: !input evening_close_time
     id: evening_close
   - trigger: time
+    at: !input reset_manual_override_morning
+    id: reset_manual_override_morning
+  - trigger: time
     at: !input reset_manual_override_time
-    id: reset_manual_override
+    id: reset_manual_override_evening
   - trigger: state
     entity_id:
       - !input left_window_sensor
@@ -258,13 +267,13 @@ triggers:
     id: humidity_high
   - trigger: state
     entity_id: !input climate_entity
+    to: ["cool", "heat", "fan_only", "dry", "heat_cool"]
     id: ac_mode_change
   - trigger: state
     entity_id: !input roller_shade
     id: cover_position_changed
 
 conditions:
-  # Skip automation DURING quiet hours (e.g. 10 PM to 7 AM) - use NOT to invert the logic
   - condition: not
     conditions:
       - condition: time
@@ -273,10 +282,21 @@ conditions:
 
 actions:
   - choose:
-      # Reset at 10 PM - always runs
+      # Reset at 6 AM - clear manual overrides before morning
       - conditions:
           - condition: trigger
-            id: reset_manual_override
+            id: reset_manual_override_morning
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input shade_state_helper
+            data:
+              value: "reset"
+
+      # Reset at 10 PM - clear manual overrides for night
+      - conditions:
+          - condition: trigger
+            id: reset_manual_override_evening
         sequence:
           - action: input_text.set_value
             target:
@@ -391,7 +411,7 @@ actions:
             data:
               value: "window_open"
 
-      # Windows closed during day - return to normal
+      # Windows closed during day
       - conditions:
           - condition: trigger
             id: window_closed
@@ -748,15 +768,10 @@ actions:
             data:
               value: "humidity_control"
 
-      # AC mode changed to anything other than OFF
+      # AC mode changed to active mode - close partially unless windows open
       - conditions:
           - condition: trigger
             id: ac_mode_change
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input climate_entity
-                state: "off"
           - condition: and
             conditions:
               - condition: state
@@ -773,11 +788,6 @@ actions:
               - condition: state
                 entity_id: !input shade_state_helper
                 state: "reset"
-              - condition: state
-                entity_id: !input roller_shade
-                state: "closed"
-          - condition: not
-            conditions:
         sequence:
           - action: input_text.set_value
             target:
@@ -797,9 +807,7 @@ actions:
             data:
               value: "ac_cooling"
 
-      # Manual adjustment detected - any cover change while helper isn't "moving"
-      # (i.e. not a change the automation itself is currently making) is treated
-      # as manual and blocks automation until the reset time.
+      # Manual adjustment detected - any cover change while not moving
       - conditions:
           - condition: trigger
             id: cover_position_changed
