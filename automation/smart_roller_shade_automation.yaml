@@ -1,5 +1,5 @@
 blueprint:
-  name: Smart Roller Shade with AC & Window Control V1.2
+  name: Smart Roller Shade with AC & Window Control V1.3
   description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Manual adjustments block automation until next reset time (6 AM or 10 PM).
   domain: automation
   author: Nir's Home Assistant Setup
@@ -85,14 +85,14 @@ blueprint:
             time:
         quiet_hours_start:
           name: Quiet hours start
-          description: Time to start ignoring all automation triggers (e.g. 22:00 for 10 PM). Set same as end time to disable quiet hours.
+          description: Time to start blocking all automation (e.g. 22:00 for 10 PM)
           default: "22:00:00"
           selector:
             time:
         quiet_hours_end:
           name: Quiet hours end
-          description: Time to resume automation (e.g. 07:00 for 7 AM). Automation will NOT run between start and end times.
-          default: "07:00:00"
+          description: Time to allow automation to resume (e.g. 06:50 AM). Automation will NOT run between start and end times.
+          default: "06:50:00"
           selector:
             time:
     presence:
@@ -274,11 +274,9 @@ triggers:
     id: cover_position_changed
 
 conditions:
-  - condition: not
-    conditions:
-      - condition: time
-        after: !input quiet_hours_start
-        before: !input quiet_hours_end
+  - condition: time
+    after: !input quiet_hours_end
+    before: !input quiet_hours_start
 
 actions:
   - choose:
