@@ -1,5 +1,5 @@
 blueprint:
-  name: Smart Roller Shade with AC & Window Control V1.3
+  name: Smart Roller Shade with AC & Window Control V1.4
   description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Manual adjustments block automation until next reset time (6 AM or 10 PM).
   domain: automation
   author: Nir's Home Assistant Setup
@@ -68,7 +68,7 @@ blueprint:
         evening_close_time:
           name: Evening close time
           description: Time to close shade in the evening
-          default: "21:00:00"
+          default: "19:00:00"
           selector:
             time:
         reset_manual_override_morning:
@@ -218,8 +218,8 @@ mode: queued
 max: 10
 
 triggers:
-  - trigger: sun
-    event: sunrise
+  - trigger: time
+    at: !input weekday_open_time
     id: weekday_morning
   - trigger: time
     at: !input weekend_open_time
@@ -273,10 +273,7 @@ triggers:
     entity_id: !input roller_shade
     id: cover_position_changed
 
-conditions:
-  - condition: time
-    after: !input quiet_hours_end
-    before: !input quiet_hours_start
+conditions: []
 
 actions:
   - choose:
