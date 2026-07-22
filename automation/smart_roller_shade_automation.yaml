@@ -1,5 +1,5 @@
 blueprint:
-  name: Smart Roller Shade with AC & Window Control V1.6
+  name: Smart Roller Shade with AC & Window Control V1.7
   description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Manual adjustments block automation until next reset time (6 AM or 10 PM).
   domain: automation
   author: Nir's Home Assistant Setup
@@ -117,12 +117,18 @@ blueprint:
           selector:
             entity:
               domain: input_text
-        notification_service:
-          name: Notification service
-          description: Service to send window-open notifications
+        primary_notification_service:
+          name: Primary notification service
+          description: Service to send window-open notifications (e.g. notify.mobile_app_nirs_iphone_15)
           selector:
             text:
-          default: "notify.nir_s_iphone_15"
+          default: "notify.mobile_app_nirs_iphone_15"
+        secondary_notification_service:
+          name: Secondary notification service (optional)
+          description: Service for partner or second person. Leave blank to disable.
+          selector:
+            text:
+          default: ""
     thresholds:
       name: Thresholds & Positions
       icon: mdi:thermometer-high
@@ -560,10 +566,18 @@ actions:
                 entity_id: !input right_window_sensor
                 state: "on"
         sequence:
-          - action: !input notification_service
+          - action: "{{ primary_notification_service }}"
             data:
               title: "Shade - Windows Open"
               message: "Windows are open at {{ now().strftime('%H:%M') }}. Please close them."
+          - if:
+              - condition: template
+                value_template: "{{ secondary_notification_service | length > 0 }}"
+            then:
+              - action: "{{ secondary_notification_service }}"
+                data:
+                  title: "Shade - Windows Open"
+                  message: "Windows are open at {{ now().strftime('%H:%M') }}. Please close them."
 
       # Person left home - partial close
       - conditions:
