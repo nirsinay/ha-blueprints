@@ -1,5 +1,5 @@
 blueprint:
-  name: Smart Roller Shade with AC & Window Control V1.4
+  name: Smart Roller Shade with AC & Window Control V1.6
   description: Multi-condition automation for roller shades with weekday/weekend scheduling, window-based open/close, AC cooling response, temperature/humidity control, and evening close. Manual adjustments block automation until next reset time (6 AM or 10 PM).
   domain: automation
   author: Nir's Home Assistant Setup
@@ -105,6 +105,12 @@ blueprint:
           selector:
             entity:
               domain: person
+        require_person_home_for_morning:
+          name: Require person home for morning open
+          description: If ON, shades only open in morning if person is home. Window/temp/humidity controls run independently regardless.
+          default: true
+          selector:
+            boolean:
         shade_state_helper:
           name: Shade State Helper
           description: "Create an input_text helper to track the last automation action.\n\n**SETUP INSTRUCTIONS:**\n1. Go to Settings → Devices & Services → Helpers\n2. Click Create Helper → Text\n3. Name it: 'Living Room Shade State' (or your room name)\n4. Set Max Character: 100\n5. Click Create\n6. Return here and select the newly created helper\n\n**HOW IT WORKS:**\n• Helper stores what the automation last set (open, closed, moving, etc.)\n• When you manually adjust the shade, automation detects it and blocks until reset\n• Resets at 6 AM (before morning open) and 10 PM\n• At reset time, helper clears and automation resumes"
@@ -299,15 +305,20 @@ actions:
             data:
               value: "reset"
 
-      # Weekday morning open
+      # Weekday morning open (requires person home if toggle is on)
       - conditions:
           - condition: trigger
             id: weekday_morning
           - condition: time
             weekday: ["mon", "tue", "wed", "thu", "fri"]
-          - condition: state
-            entity_id: !input person_entity
-            state: "home"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input person_entity
+                state: "home"
+              - condition: state
+                entity_id: !input require_person_home_for_morning
+                state: "off"
           - condition: or
             conditions:
               - condition: state
@@ -335,15 +346,20 @@ actions:
             data:
               value: "open"
 
-      # Weekend morning open
+      # Weekend morning open (requires person home if toggle is on)
       - conditions:
           - condition: trigger
             id: weekend_morning
           - condition: time
             weekday: ["sat", "sun"]
-          - condition: state
-            entity_id: !input person_entity
-            state: "home"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input person_entity
+                state: "home"
+              - condition: state
+                entity_id: !input require_person_home_for_morning
+                state: "off"
           - condition: or
             conditions:
               - condition: state
@@ -763,7 +779,7 @@ actions:
             data:
               value: "humidity_control"
 
-      # AC mode changed to active mode - close partially unless windows open
+      # AC mode changed to active mode - close partially (only if blinds already open, not closed)
       - conditions:
           - condition: trigger
             id: ac_mode_change
@@ -783,6 +799,11 @@ actions:
               - condition: state
                 entity_id: !input shade_state_helper
                 state: "reset"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input roller_shade
+                state: "closed"
         sequence:
           - action: input_text.set_value
             target:
